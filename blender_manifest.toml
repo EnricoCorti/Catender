@@ -1,0 +1,35 @@
+# Blender Extension Manifest (source copy)
+schema_version = "1.0.0"
+
+id = "catia_gsd"
+version = "0.1.0"
+name = "CATIA GSD"
+tagline = "CATIA V5 Generative Shape Design — NURBS surface modeling"
+maintainer = "GSD Blender Team"
+type = "add-on"
+
+website = "https://github.com/catia-gsd-blender/catia_gsd"
+
+tags = ["Modeling", "Geometry Nodes", "Add Curve", "Add Mesh", "3D View"]
+
+blender_version_min = "5.1.0"
+
+license = ["SPDX:MIT"]
+
+copyright = ["2026 GSD Blender Team"]
+
+platforms = ["windows-x64"]
+
+[permissions]
+files = "Import and export CAD files"
+
+[build]
+paths_exclude_pattern = [
+    "__pycache__/",
+    "/.git/",
+    "/.vscode/",
+    "/*.zip",
+    "*.blend1",
+    ".gitignore",
+    "README.md",
+]
