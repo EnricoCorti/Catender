@@ -11,12 +11,21 @@ class GSD_OT_Extrude(GsdBaseOperator):
     def compute_ocp_result(self, inputs, params):
         from OCP.gp import gp_Vec
         from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
-        from ..core.ocp_bridge import bl_to_ocp_surface
-        surf = bl_to_ocp_surface(inputs[0])
+        from ..core.ocp_bridge import bl_to_ocp_shape
+        
+        shape = bl_to_ocp_shape(inputs[0])
         l1 = params.get("limit1", 20)
         vec = gp_Vec(0, 0, l1)
-        prism = BRepPrimAPI_MakePrism(surf, vec, False).Shape()
-        return prism
+        
+        # BRepPrimAPI_MakePrism works with both wires and faces
+        try:
+            prism = BRepPrimAPI_MakePrism(shape, vec, False).Shape()
+            return prism
+        except Exception:
+            # If shape is a wire with no face, make a face
+            from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+            face = BRepBuilderAPI_MakeFace(shape).Face()
+            return BRepPrimAPI_MakePrism(face, vec, False).Shape()
 
 class GSD_OT_Revolve(GsdBaseOperator):
     bl_idname = "gsd.revolve"; bl_label = "Revolve"; gsd_command = "Revolve"

@@ -28,12 +28,15 @@ class GSD_OT_Fill(GsdBaseOperator):
         from ..core.ocp_bridge import bl_to_ocp_shape
         from OCP.TopExp import TopExp_Explorer
         from OCP.TopAbs import TopAbs_EDGE
+        from OCP.TopoDS import TopoDS
+        from OCP.GeomAbs import GeomAbs_C0
         filler = BRepFill_Filling()
         for obj in inputs:
             shape = bl_to_ocp_shape(obj)
             explorer = TopExp_Explorer(shape, TopAbs_EDGE)
             while explorer.More():
-                filler.Add(explorer.Current(), 1)  # GeomAbs_C0
+                edge = TopoDS.Edge_s(explorer.Current())
+                filler.Add(edge, GeomAbs_C0)
                 explorer.Next()
         filler.Build()
         return filler.Face()
@@ -52,12 +55,15 @@ class GSD_OT_Blend(GsdBaseOperator):
         from ..core.ocp_bridge import bl_to_ocp_shape
         from OCP.TopExp import TopExp_Explorer
         from OCP.TopAbs import TopAbs_EDGE
+        from OCP.TopoDS import TopoDS
+        from OCP.GeomAbs import GeomAbs_C0
         filler = BRepFill_Filling()
         for obj in inputs:
             shape = bl_to_ocp_shape(obj)
             explorer = TopExp_Explorer(shape, TopAbs_EDGE)
             while explorer.More():
-                filler.Add(explorer.Current(), 1)
+                edge = TopoDS.Edge_s(explorer.Current())
+                filler.Add(edge, GeomAbs_C0)
                 explorer.Next()
         filler.Build()
         return filler.Face()
