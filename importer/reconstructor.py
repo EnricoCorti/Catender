@@ -50,17 +50,25 @@ class SequentialReconstructor:
     of each type and using them as inputs for subsequent commands."""
     
     def __init__(self, collection_name: str):
+        # Track last object of each type
+        self.last_of_type = {}
+        # Track all objects
+        self.objects = {}
+        # Name counters
+        self.counters = {}
+        # Log
+        self.log = []
+        
         self.collection = bpy.data.collections.new(collection_name)
         bpy.context.scene.collection.children.link(self.collection)
-        
-        # Track last object of each type
-        self.last_of_type: Dict[str, bpy.types.Object] = {}
-        # Track all objects
-        self.objects: Dict[str, bpy.types.Object] = {}
-        # Name counters
-        self.counters: Dict[str, int] = {}
-        # Log
-        self.log: List[Dict] = []
+        bpy.ops.object.empty_add(type='SPHERE', location=(0,0,0))
+        origin = bpy.context.object; origin.name = 'Origin'; origin['gsd_type'] = 'Point'
+        self.last_of_type['Point'] = origin; self.last_of_type['GSMPoint'] = origin
+        # Also create default plane for surface operations
+        bpy.ops.mesh.primitive_plane_add(size=20, location=(0,0,0))
+        def_plane = bpy.context.object; def_plane.name = 'DefaultPlane'; def_plane['gsd_type'] = 'Plane'
+        self.last_of_type['Plane'] = def_plane; self.last_of_type['GSMPlane'] = def_plane
+        self.last_of_type['Surface'] = def_plane
     
     def _next_name(self, catia_type: str) -> str:
         """Generate next name based on CATIA feature type."""

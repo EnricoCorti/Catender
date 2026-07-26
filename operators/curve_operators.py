@@ -21,8 +21,10 @@ class GSD_OT_Circle(GsdBaseOperator):
         ct = params.get("circle_type", "CenterRadius")
         r = params.get("radius", 5)
         if ct in ("CenterRadius", "CenterPoint", "ThreePoints", "CenterAxis"):
-            center = inputs[0].location if len(inputs) >= 1 else (0, 0, 0)
-            ax2 = gp_Ax2(gp_Pnt(center.x, center.y, center.z), gp_Dir(0, 0, 1))
+            cx = cy = cz = 0.0
+            if len(inputs) >= 1 and hasattr(inputs[0], 'location'):
+                loc = inputs[0].location; cx, cy, cz = loc.x, loc.y, loc.z
+            ax2 = gp_Ax2(gp_Pnt(cx, cy, cz), gp_Dir(0, 0, 1))
             circ = gp_Circ(ax2, r)
             sa = params.get("start_angle", 0) * 3.14159 / 180
             ea = params.get("end_angle", 360) * 3.14159 / 180

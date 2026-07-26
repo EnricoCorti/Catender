@@ -251,9 +251,13 @@ class GSD_OT_Line(GsdBaseOperator):
         start_l = params.get("start_length", 0)
         end_l = params.get("end_length", 10)
 
-        if lt == "PointPoint" and len(inputs) >= 2:
-            p1 = inputs[0].location
-            p2 = inputs[1].location
+        if lt == "PointPoint":
+            if len(inputs) >= 2 and hasattr(inputs[0], 'location') and hasattr(inputs[1], 'location'):
+                p1 = inputs[0].location; p2 = inputs[1].location
+            elif len(inputs) >= 1 and hasattr(inputs[0], 'location'):
+                p1 = inputs[0].location; p2 = type(p1)((p1.x+10, p1.y, p1.z))
+            else:
+                from mathutils import Vector; p1 = Vector((0,0,0)); p2 = Vector((10,0,0))
             p1_ocp = gp_Pnt(p1.x, p1.y, p1.z)
             p2_ocp = gp_Pnt(p2.x, p2.y, p2.z)
             seg = GC_MakeSegment(p1_ocp, p2_ocp).Value()
@@ -261,22 +265,17 @@ class GSD_OT_Line(GsdBaseOperator):
             wire = BRepBuilderAPI_MakeWire(edge).Wire()
             return wire
 
-        elif lt == "PointDirection" and len(inputs) >= 2:
-            p1 = inputs[0].location
-            direction = inputs[1].matrix_world.col[2].xyz.normalized()
+        elif lt == "PointDirection":
+            if len(inputs) >= 2 and hasattr(inputs[0], 'location') and hasattr(inputs[1], 'matrix_world'):
+                p1 = inputs[0].location
+                direction = inputs[1].matrix_world.col[2].xyz.normalized()
+            else:
+                from mathutils import Vector
+                p1 = Vector((0,0,0)); direction = Vector((1,0,0))
             p1_ocp = gp_Pnt(p1.x, p1.y, p1.z)
             dir_ocp = gp_Dir(direction.x, direction.y, direction.z)
-            # Extend in both directions
-            p_start = gp_Pnt(
-                p1_ocp.X() - start_l * dir_ocp.X(),
-                p1_ocp.Y() - start_l * dir_ocp.Y(),
-                p1_ocp.Z() - start_l * dir_ocp.Z(),
-            )
-            p_end = gp_Pnt(
-                p1_ocp.X() + end_l * dir_ocp.X(),
-                p1_ocp.Y() + end_l * dir_ocp.Y(),
-                p1_ocp.Z() + end_l * dir_ocp.Z(),
-            )
+            p_start = gp_Pnt(p1_ocp.X()-start_l*dir_ocp.X(), p1_ocp.Y()-start_l*dir_ocp.Y(), p1_ocp.Z()-start_l*dir_ocp.Z())
+            p_end = gp_Pnt(p1_ocp.X()+end_l*dir_ocp.X(), p1_ocp.Y()+end_l*dir_ocp.Y(), p1_ocp.Z()+end_l*dir_ocp.Z())
             seg = GC_MakeSegment(p_start, p_end).Value()
             edge = BRepBuilderAPI_MakeEdge(seg).Edge()
             wire = BRepBuilderAPI_MakeWire(edge).Wire()
