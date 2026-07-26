@@ -45,6 +45,10 @@ def register():
         sweep_operators.register(); analysis_operators.register(); replication_operators.register(); tools_operators.register()
         from .panels import main_panel
         main_panel.register()
+        
+        from .importer import catpart_import_operator
+        catpart_import_operator.register()
+        
         from .core import gsd_dependency_graph
         gsd_dependency_graph.register()
         # Defer bpy.data access to after full startup
@@ -63,6 +67,7 @@ def register():
 def unregister():
     try:
         from .panels import main_panel; main_panel.unregister()
+        from .importer import catpart_import_operator; catpart_import_operator.unregister()
         from .operators import tools_operators, replication_operators, analysis_operators, sweep_operators, project_combine_operators, pattern_operators, transform_operators, fillet_operators, join_trim_operators, transition_operators, surface_operators, curve_operators, wireframe_operators
         tools_operators.unregister(); replication_operators.unregister(); analysis_operators.unregister()
         sweep_operators.unregister(); project_combine_operators.unregister(); pattern_operators.unregister()
