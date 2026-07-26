@@ -1,14 +1,14 @@
-# Blender Extension Manifest (source copy)
+# Catender — Blender Extension Manifest
 schema_version = "1.0.0"
 
 id = "catia_gsd"
 version = "0.1.0"
-name = "CATIA GSD"
-tagline = "CATIA V5 Generative Shape Design — NURBS surface modeling"
-maintainer = "GSD Blender Team"
+name = "Catender"
+tagline = "CATIA Generative Shape Design for Blender — NURBS surface modeling"
+maintainer = "EnricoCorti"
 type = "add-on"
 
-website = "https://github.com/catia-gsd-blender/catia_gsd"
+website = "https://github.com/EnricoCorti/Catender"
 
 tags = ["Modeling", "Geometry Nodes", "Add Curve", "Add Mesh", "3D View"]
 
@@ -16,7 +16,7 @@ blender_version_min = "5.1.0"
 
 license = ["SPDX:MIT"]
 
-copyright = ["2026 GSD Blender Team"]
+copyright = ["2026 EnricoCorti"]
 
 platforms = ["windows-x64"]
 
