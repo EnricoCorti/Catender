@@ -74,24 +74,20 @@ class CATPART_OT_Import(Operator, ImportHelper):
             catia_type = step['catia_type']
             print(f"  [{i+1}/{len(plan)}] {catia_type} -> {op_id}: {params}")
         
-        # EXECUTE THE RECONSTRUCTION
+        # EXECUTE GEOMETRY RECONSTRUCTION
         if self.create_dependencies and plan:
-            from .reconstructor import reconstruct_catpart
-            ctx_recon = reconstruct_catpart(plan, collection_name)
-            
-            success = sum(1 for log in ctx_recon.command_log if log['status'] == 'OK')
-            fail = sum(1 for log in ctx_recon.command_log if log['status'] != 'OK')
-            print(f"Geometry created: {success} features, {fail} skipped")
+            from .reconstructor import SequentialReconstructor
+            recon = SequentialReconstructor(collection_name)
+            result = recon.execute_plan(plan)
             
             self.report(
                 {'INFO'},
-                f"Imported {filename}: {success} features created"
+                f"Created {result['ok']} features from {filename} ({result['fail']} skipped)"
             )
         else:
             self.report(
                 {'INFO'},
-                f"Scanned {filename}: {st['mapped']}/{st['total']} commands "
-                f"({st['unique_operators']} unique operators)"
+                f"Scanned {filename}: {st['mapped']}/{st['total']} commands"
             )
         
         return {'FINISHED'}

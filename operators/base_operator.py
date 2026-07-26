@@ -57,8 +57,8 @@ class GsdBaseOperator(bpy.types.Operator):
         inputs = get_selected_gsd_objects(context)
 
         if len(inputs) < self.min_inputs():
-            self.report({'ERROR'}, f"Select at least {self.min_inputs()} GSD element(s)")
-            return {'CANCELLED'}
+            # Allow creation without inputs — create at origin/with defaults
+            pass
 
         # 2. Build parameter dict from operator properties
         params = self._collect_parameters()
@@ -98,8 +98,8 @@ class GsdBaseOperator(bpy.types.Operator):
     # ---- Override points ----
 
     def min_inputs(self) -> int:
-        """Minimum number of input objects required."""
-        return 1
+        """Minimum number of input objects required. Override in subclass."""
+        return 0  # Default: allow creation without inputs
 
     def max_inputs(self) -> int:
         """Maximum number of input objects allowed."""

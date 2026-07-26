@@ -1,302 +1,250 @@
-"""CATPart Geometry Reconstructor — Execute CATPart feature tree in Blender.
+"""Enhanced CATPart Reconstructor — Sequential dependency resolution.
 
-Takes the mapped GSM→Catender import plan and creates actual 3D geometry
-by executing Catender operators in dependency order, tracking created objects
-for cross-referencing between commands.
+Since CATPart binary stores feature references in structured Geometric Component
+blocks (not inline with GSM commands), we use a sequential tracking approach:
+each new command uses the most recently created object of the required input type.
+This mirrors how CATIA's specification tree resolves dependencies in order.
 """
 
 import bpy
 from typing import Dict, List, Any, Optional
 
+# Type hierarchy for input resolution
+# Maps what input types each GSM command category needs
+INPUT_TYPES = {
+    "Point": [],  # Points are leaf nodes, no inputs needed
+    "Line": ["Point", "Direction"],
+    "Plane": ["Plane", "Point", "Axis"],
+    "Circle": ["Point", "Plane"],
+    "Spline": ["Point"],
+    "Curve": ["Point", "Curve"],
+    "Extrude": ["Curve", "Direction"],
+    "Revolve": ["Curve", "Axis"],
+    "Sphere": ["Point"],
+    "Cylinder": ["Point", "Direction"],
+    "Sweep": ["Curve", "Curve"],
+    "Loft": ["Curve"],
+    "Fill": ["Curve"],
+    "Blend": ["Curve"],
+    "Split": ["Surface", "Surface"],
+    "Trim": ["Surface", "Surface"],
+    "Join": ["Surface"],
+    "Translate": ["Any", "Direction"],
+    "Rotate": ["Any", "Axis"],
+    "Symmetry": ["Any", "Plane"],
+    "Scaling": ["Any", "Point"],
+    "Affinity": ["Any"],
+    "Project": ["Curve", "Surface"],
+    "Intersect": ["Any", "Any"],
+    "Fillet": ["Surface"],
+    "Offset": ["Surface"],
+    "Near": ["Any", "Point"],
+    "Extrapolate": ["Surface"],
+    "Axis": ["Any"],
+    "Direction": ["Line"],
+}
 
-class ReconstructionContext:
-    """Tracks objects created during CATPart reconstruction.
+
+class SequentialReconstructor:
+    """Reconstructs CATPart geometry by tracking the last created object
+    of each type and using them as inputs for subsequent commands."""
     
-    Maps CATIA feature names (e.g., "Point.1", "Line.3") to Blender objects
-    so subsequent commands can find their inputs.
-    """
-    
-    def __init__(self, collection: bpy.types.Collection):
-        self.collection = collection
-        self.objects: Dict[str, bpy.types.Object] = {}  # name -> object
-        self.counters: Dict[str, int] = {}  # type -> next number
-        self.command_log: List[Dict] = []
+    def __init__(self, collection_name: str):
+        self.collection = bpy.data.collections.new(collection_name)
+        bpy.context.scene.collection.children.link(self.collection)
+        
+        # Track last object of each type
+        self.last_of_type: Dict[str, bpy.types.Object] = {}
+        # Track all objects
+        self.objects: Dict[str, bpy.types.Object] = {}
+        # Name counters
+        self.counters: Dict[str, int] = {}
+        # Log
+        self.log: List[Dict] = []
     
     def _next_name(self, catia_type: str) -> str:
-        """Generate the next Blender name for a feature type."""
-        # Map CATIA type to short name
-        short_names = {
-            "Point": "Point", "Line": "Line", "Plane": "Plane",
-            "Circle": "Circle", "Spline": "Spline", "Helix": "Helix",
-            "Spiral": "Spiral", "Spine": "Spine",
-            "Extrude": "Extrude", "Sphere": "Sphere", "Cylinder": "Cylinder",
-            "Sweep": "Sweep", "Loft": "Loft", "Fill": "Fill", "Blend": "Blend",
-            "Translate": "Translate", "Rotate": "Rotate",
-            "Split": "Split", "Trim": "Trim", "Join": "Join",
+        """Generate next name based on CATIA feature type."""
+        type_map = {
+            "GSMPoint": "Point", "GSMLine": "Line", "GSMPlane": "Plane",
+            "GSMCircle": "Circle", "GSMSpline": "Spline", "GSMHelix": "Helix",
+            "GSMSpiral": "Spiral", "GSMSpine": "Spine",
+            "GSMExtrude": "Extrude", "GSMSphere": "Sphere", "GSMCylinder": "Cylinder",
+            "GSMSweep": "Sweep", "GSMLoft": "Loft", "GSMFill": "Fill", "GSMBlend": "Blend",
+            "GSMOffset": "Offset",
+            "GSMSplit": "Split", "GSMTrim": "Trim", "GSMJoin": "Join", "GSMAssemble": "Join",
+            "GSMTranslate": "Translate", "GSMRotate": "Rotate",
+            "GSMSymmetry": "Symmetry", "GSMScaling": "Scaling", "GSMAffinity": "Affinity",
+            "GSMProject": "Project", "GSMIntersect": "Intersection",
+            "GSMFillet": "Fillet", "GSMNear": "Near",
+        }
+        for prefix, short in type_map.items():
+            if catia_type.startswith(prefix):
+                c = self.counters.get(short, 0) + 1
+                self.counters[short] = c
+                return f"{short}.{c}"
+        c = self.counters.get("Feature", 0) + 1
+        self.counters["Feature"] = c
+        return f"Feature.{c}"
+    
+    def _get_input_object(self, input_type: str) -> Optional[bpy.types.Object]:
+        """Get the most recent object of the given input type."""
+        if input_type == "Any":
+            # Return any available object
+            for t in ["Point", "Line", "Plane", "Circle", "Curve", "Surface", "Extrude"]:
+                if t in self.last_of_type:
+                    return self.last_of_type[t]
+            return None
+        
+        # Category matching
+        categories = {
+            "Point": ["Point"],
+            "Line": ["Line"],
+            "Plane": ["Plane"],
+            "Curve": ["Line", "Circle", "Spline", "Helix", "Spiral", "Spine", "Curve"],
+            "Surface": ["Extrude", "Sphere", "Cylinder", "Sweep", "Loft", "Fill", "Blend", "Offset", "Plane", "Surface"],
+            "Direction": ["Line", "Axis"],
+            "Axis": ["Axis", "Line"],
+            "Any": ["Point", "Line", "Plane", "Circle", "Curve", "Surface", "Extrude"],
         }
         
-        # Detect type from GSM command
-        for gsm_prefix, short in short_names.items():
-            if gsm_prefix in catia_type:
-                count = self.counters.get(short, 0) + 1
-                self.counters[short] = count
-                return f"{short}.{count}"
-        
-        # Generic fallback
-        count = self.counters.get("Feature", 0) + 1
-        self.counters["Feature"] = count
-        return f"Feature.{count}"
-    
-    def register_object(self, obj: bpy.types.Object, name: str):
-        """Register a created object for future reference."""
-        self.objects[name] = obj
-        # Also register without number suffix for dependency lookup
-        base = name.rsplit(".", 1)[0]
-        if base not in self.objects:
-            self.objects[base] = obj
-    
-    def find_input(self, name: str) -> Optional[bpy.types.Object]:
-        """Find an input object by name (exact or partial match)."""
-        if name in self.objects:
-            return self.objects[name]
-        # Try base name without number
-        if "." in name:
-            base = name.split(".")[0]
-            if base in self.objects:
-                return self.objects[base]
+        types_to_try = categories.get(input_type, [input_type])
+        for t in types_to_try:
+            if t in self.last_of_type:
+                return self.last_of_type[t]
         return None
     
-    def select(self, *names: str):
-        """Select objects by name for operator input."""
+    def _get_catia_category(self, gsm_type: str) -> str:
+        """Get the category of a GSM command for tracking."""
+        for prefix in ["GSMPoint", "GSMLine", "GSMPlane", "GSMCircle",
+                        "GSMSpline", "GSMHelix", "GSMSpiral", "GSMSpine",
+                        "GSMExtrude", "GSMSphere", "GSMCylinder", "GSMSweep",
+                        "GSMLoft", "GSMFill", "GSMBlend", "GSMOffset",
+                        "GSMTranslate", "GSMRotate", "GSMAffinity",
+                        "GSMSplit", "GSMTrim", "GSMJoin", "GSMAssemble",
+                        "GSMFillet", "GSMNear", "GSMProject", "GSMIntersect"]:
+            if gsm_type.startswith(prefix):
+                return prefix
+        return "GSMOther"
+    
+    def execute_plan(self, plan: List[Dict]) -> Dict[str, int]:
+        """Execute the import plan, creating Blender geometry."""
+        ok = 0
+        fail = 0
+        
+        for i, step in enumerate(plan):
+            op_id = step['operator_id']
+            params = step['parameters']
+            catia_type = step['catia_type']
+            
+            try:
+                obj = self._execute_one(op_id, params, catia_type)
+                if obj:
+                    # Move to collection
+                    for c in list(obj.users_collection):
+                        c.objects.unlink(obj)
+                    self.collection.objects.link(obj)
+                    
+                    name = self._next_name(catia_type)
+                    obj.name = name
+                    obj['gsd_type'] = name.split(".")[0]
+                    
+                    self.objects[name] = obj
+                    cat = self._get_catia_category(catia_type)
+                    self.last_of_type[cat] = obj
+                    # Also store under the short type
+                    short = name.split(".")[0]
+                    self.last_of_type[short] = obj
+                    
+                    ok += 1
+                    self.log.append({"index": i, "cmd": catia_type, "op": op_id, "result": name, "status": "OK"})
+                else:
+                    fail += 1
+                    self.log.append({"index": i, "cmd": catia_type, "op": op_id, "result": None, "status": "NO_RESULT"})
+            except Exception as e:
+                fail += 1
+                self.log.append({"index": i, "cmd": catia_type, "op": op_id, "status": f"ERROR: {e}"})
+        
+        print(f"Sequential reconstruction: {ok} OK, {fail} FAIL")
+        return {"ok": ok, "fail": fail}
+    
+    def _execute_one(self, op_id: str, params: Dict, catia_type: str) -> Optional[bpy.types.Object]:
+        """Execute a single Catender operator."""
+        op_func = self._get_op(op_id)
+        if op_func is None:
+            return None
+        
+        # Determine required input types
+        cat = self._get_catia_category(catia_type)
+        needed = INPUT_TYPES.get(cat.replace("GSM", ""), [])
+        
+        # Select inputs
         bpy.ops.object.select_all(action='DESELECT')
-        objs = []
-        for name in names:
-            obj = self.find_input(name)
+        input_objs = []
+        for itype in needed:
+            obj = self._get_input_object(itype)
             if obj:
                 obj.select_set(True)
-                objs.append(obj)
-        if objs:
-            bpy.context.view_layer.objects.active = objs[0]
-        return objs
-
-
-def reconstruct_catpart(plan: List[Dict], collection_name: str) -> ReconstructionContext:
-    """Execute a CATPart import plan, creating Blender geometry.
-    
-    Args:
-        plan: List of mapped commands from gsm_mapper.get_import_plan().
-        collection_name: Name for the Blender collection.
+                input_objs.append(obj)
         
-    Returns:
-        ReconstructionContext with all created objects.
-    """
-    # Create collection
-    collection = bpy.data.collections.new(collection_name)
-    bpy.context.scene.collection.children.link(collection)
-    
-    ctx = ReconstructionContext(collection)
-    
-    # Process commands in order (CATParts store them in dependency order)
-    success_count = 0
-    fail_count = 0
-    
-    for i, step in enumerate(plan):
-        op_id = step['operator_id']
-        params = step['parameters']
-        catia_type = step['catia_type']
+        if input_objs:
+            bpy.context.view_layer.objects.active = input_objs[0]
+        
+        # Filter params
+        filtered = self._filter_params(op_id, params)
         
         try:
-            obj = _execute_operator(ctx, op_id, params, catia_type)
-            if obj:
-                # Move object to our collection
-                for c in obj.users_collection:
-                    c.objects.unlink(obj)
-                collection.objects.link(obj)
-                
-                name = ctx._next_name(catia_type)
-                obj.name = name
-                obj['gsd_type'] = name.split(".")[0]
-                ctx.register_object(obj, name)
-                
-                success_count += 1
-                ctx.command_log.append({
-                    "index": i,
-                    "catia_type": catia_type,
-                    "operator": op_id,
-                    "params": params,
-                    "result": name,
-                    "status": "OK",
-                })
-            else:
-                fail_count += 1
-                ctx.command_log.append({
-                    "index": i,
-                    "catia_type": catia_type,
-                    "operator": op_id,
-                    "params": params,
-                    "status": "NO_RESULT",
-                })
-        except Exception as e:
-            fail_count += 1
-            ctx.command_log.append({
-                "index": i,
-                "catia_type": catia_type,
-                "operator": op_id,
-                "params": params,
-                "status": f"ERROR: {e}",
-            })
-    
-    print(f"Reconstruction: {success_count} OK, {fail_count} FAIL, {len(plan)} total")
-    return ctx
-
-
-def _execute_operator(
-    ctx: ReconstructionContext,
-    op_id: str,
-    params: Dict[str, Any],
-    catia_type: str
-) -> Optional[bpy.types.Object]:
-    """Execute a single Catender operator and return the created object."""
-    
-    # Get the operator function
-    op_func = _get_operator(op_id)
-    if op_func is None:
-        print(f"  Unknown operator: {op_id}")
-        return None
-    
-    # Select inputs based on the command type
-    _select_inputs(ctx, catia_type, params)
-    
-    # Prepare filtered params (remove non-operator properties)
-    filtered_params = _filter_params(op_id, params)
-    
-    # Execute the operator
-    try:
-        result = op_func('EXEC_DEFAULT', **filtered_params)
-        if result == {'FINISHED'}:
-            # Return the newly created active object
-            return bpy.context.view_layer.objects.active
-    except Exception as e:
-        # Try with fewer params
-        try:
-            result = op_func('EXEC_DEFAULT')
+            result = op_func('EXEC_DEFAULT', **filtered)
             if result == {'FINISHED'}:
                 return bpy.context.view_layer.objects.active
         except:
-            pass
-    
-    return None
-
-
-def _get_operator(op_id: str):
-    """Get the Blender operator function from its id."""
-    parts = op_id.split(".")
-    if len(parts) != 2:
+            try:
+                result = op_func('EXEC_DEFAULT')
+                if result == {'FINISHED'}:
+                    return bpy.context.view_layer.objects.active
+            except:
+                pass
+        
         return None
-    module_name, op_name = parts
-    module = getattr(bpy.ops, module_name, None)
-    if module is None:
-        return None
-    return getattr(module, op_name, None)
-
-
-def _select_inputs(ctx: ReconstructionContext, catia_type: str, params: Dict):
-    """Select appropriate input objects for the command."""
-    # Map of GSM commands to their input parameter names
-    input_params = {
-        "GSMPointCoord": [],
-        "GSMPointOnCurve": ["Curve"],
-        "GSMPointOnPlane": ["Plane"],
-        "GSMPointOnSurface": ["Surface"],
-        "GSMPointBetween": ["Point1", "Point2"],
-        "GSMPointCenter": ["Element"],
-        "GSMPointTangent": ["Curve"],
-        "GSMLinePtPt": ["Point1", "Point2"],
-        "GSMLinePtDir": ["Point"],
-        "GSMLineAngle": ["Curve", "Point"],
-        "GSMLineNormal": ["Surface", "Point"],
-        "GSMPlaneOffset": ["Plane"],
-        "GSMPlaneAngle": ["Plane", "Axis"],
-        "GSMPlaneThreePoints": ["Point1", "Point2", "Point3"],
-        "GSMCircleCtrRad": ["Center", "Support"],
-        "GSMCircleCenterAxisRadius": ["Center", "Axis"],
-        "GSMCircleBitangentRadRadius": ["Element1", "Element2"],
-        "GSMExtrude": ["Profile", "Direction"],
-        "GSMSphere": ["Center"],
-        "GSMSweep": ["Profile", "Guide"],
-        "GSMTranslate": ["Element", "Direction"],
-        "GSMRotate": ["Element", "Axis"],
-        "GSMAffinity": ["Element", "AxisSystem"],
-        "GSMSplit": ["ElementToCut", "CuttingElement"],
-        "GSMTrim": ["Element1", "Element2"],
-        "GSMIntersect": ["Element1", "Element2"],
-        "GSMExtrapol": ["Surface", "Edge"],
-        "GSMAssemble": ["Elements"],
-        "GSMProject": ["Element", "Support"],
-        "GSMNear": ["Element"],
-        "GSMAxisToAxis": [],
-    }
     
-    # Find the matching input parameter list
-    input_names = []
-    for prefix, names in input_params.items():
-        if catia_type.startswith(prefix):
-            input_names = names
-            break
+    def _get_op(self, op_id: str):
+        parts = op_id.split(".")
+        if len(parts) != 2: return None
+        mod = getattr(bpy.ops, parts[0], None)
+        if mod is None: return None
+        return getattr(mod, parts[1], None)
     
-    if not input_names:
-        return
-    
-    # Select the inputs
-    select_names = []
-    for name in input_names:
-        if name in params:
-            obj = ctx.find_input(params[name])
-            if obj:
-                select_names.append(obj.name)
-    
-    if select_names:
-        ctx.select(*select_names)
-
-
-def _filter_params(op_id: str, params: Dict) -> Dict:
-    """Filter params to only those accepted by the operator."""
-    # Map operators to their accepted parameter names
-    OPERATOR_PARAMS = {
-        "gsd.point": ["point_type", "x", "y", "z", "ratio", "offset"],
-        "gsd.line": ["line_type", "start_length", "end_length", "angle", "length_type"],
-        "gsd.plane": ["plane_type", "offset_distance", "angle"],
-        "gsd.circle": ["circle_type", "radius", "start_angle", "end_angle"],
-        "gsd.spline": ["spline_type", "closure"],
-        "gsd.helix": ["pitch", "height", "orientation", "taper_angle", "starting_angle"],
-        "gsd.spiral": ["spiral_type", "start_radius", "end_radius", "end_angle", "nb_revolutions"],
-        "gsd.spine": [],
-        "gsd.extrude": ["limit1", "limit2"],
-        "gsd.revolve": ["angle1"],
-        "gsd.sphere_surface": ["radius"],
-        "gsd.cylinder_surface": ["radius", "length1"],
-        "gsd.sweep": ["sweep_family"],
-        "gsd.loft": ["coupling", "relimitation"],
-        "gsd.fill": ["continuity"],
-        "gsd.blend": ["continuity1", "continuity2", "tension1", "tension2"],
-        "gsd.translate": ["distance"],
-        "gsd.rotate": ["angle"],
-        "gsd.symmetry": [],
-        "gsd.scaling": ["factor"],
-        "gsd.affinity": ["x_factor", "y_factor", "z_factor"],
-        "gsd.join": ["merging_distance"],
-        "gsd.split": [],
-        "gsd.trim": [],
-        "gsd.sew": ["tolerance"],
-        "gsd.fillet": ["fillet_type", "radius"],
-        "gsd.near": [],
-        "gsd.offset": ["offset_type", "offset_distance"],
-        "gsd.projection": [],
-        "gsd.intersection": [],
-    }
-    
-    allowed = set(OPERATOR_PARAMS.get(op_id, []))
-    if not allowed:
-        return {}  # No params accepted
-    
-    return {k: v for k, v in params.items() if k in allowed}
+    def _filter_params(self, op_id: str, params: Dict) -> Dict:
+        OP_PARAMS = {
+            "gsd.point": ["point_type", "x", "y", "z", "ratio", "offset"],
+            "gsd.line": ["line_type", "start_length", "end_length", "angle"],
+            "gsd.plane": ["plane_type", "offset_distance", "angle"],
+            "gsd.circle": ["circle_type", "radius", "start_angle", "end_angle"],
+            "gsd.spline": ["spline_type", "closure"],
+            "gsd.helix": ["pitch", "height"],
+            "gsd.spiral": ["spiral_type", "start_radius", "end_radius"],
+            "gsd.spine": [],
+            "gsd.extrude": ["limit1", "limit2"],
+            "gsd.revolve": ["angle1"],
+            "gsd.sphere_surface": ["radius"],
+            "gsd.cylinder_surface": ["radius", "length1"],
+            "gsd.sweep": ["sweep_family"],
+            "gsd.loft": ["coupling"],
+            "gsd.fill": ["continuity"],
+            "gsd.blend": ["continuity1", "continuity2"],
+            "gsd.translate": ["distance"],
+            "gsd.rotate": ["angle"],
+            "gsd.symmetry": [],
+            "gsd.scaling": ["factor"],
+            "gsd.affinity": ["x_factor", "y_factor", "z_factor"],
+            "gsd.join": ["merging_distance"],
+            "gsd.split": [],
+            "gsd.trim": [],
+            "gsd.sew": ["tolerance"],
+            "gsd.fillet": ["fillet_type", "radius"],
+            "gsd.near": [],
+            "gsd.offset": ["offset_type", "offset_distance"],
+            "gsd.projection": [],
+            "gsd.intersection": [],
+        }
+        allowed = set(OP_PARAMS.get(op_id, []))
+        return {k: v for k, v in params.items() if k in allowed} if allowed else {}
