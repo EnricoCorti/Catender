@@ -1,5 +1,5 @@
 """CATPart Importer — Extract and reproduce CATIA V5 parts in Blender."""
-from .catpart_reader import read_catpart, summarize_tree, CatPartFeatureTree, GsmCommand
+from .catpart_reader import read_catpart, summarize_tree, extract_udfs, CatPartFeatureTree, GsmCommand
 from .gsm_mapper import map_command_to_catender, get_import_plan, GSM_TO_CATENDER
 from .catpart_import_operator import register as register_ops, unregister as unregister_ops
 

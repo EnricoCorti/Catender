@@ -242,6 +242,61 @@ def _get_base_command(full_cmd: str) -> str:
     return full_cmd
 
 
+
+def extract_udfs(filepath: str) -> list:
+    """Extract User Defined Feature (GSMTool) definitions from a CATPart.
+    
+    Returns list of dicts with: name, commands, publications, position
+    """
+    import os
+    filename = os.path.basename(filepath)
+    
+    with open(filepath, 'rb') as f:
+        data = f.read()
+    
+    # Search for GSMTool in hex bytes
+    gsm_hex = b'GSMTool'
+    udfs = []
+    pos = 0
+    
+    while True:
+        idx = data.find(gsm_hex, pos)
+        if idx == -1:
+            break
+        
+        # Extract context
+        start = max(0, idx - 50)
+        end = min(len(data), idx + 500)
+        ctx_bytes = data[start:end]
+        ctx_text = ''.join(chr(b) if 32 <= b < 127 else '.' for b in ctx_bytes)
+        
+        # Extract name
+        name = "Unnamed"
+        name_match = __import__('re').search(r'GSMTool\.(\w+)', ctx_text)
+        if name_match:
+            name = name_match.group(1)
+        
+        # Extract GSM commands
+        cmd_matches = __import__('re').findall(r'GSM[A-Z][a-zA-Z]+', ctx_text)
+        commands = list(set(cmd_matches))
+        
+        # Extract publications (inputs/outputs)
+        pub_matches = __import__('re').findall(r'(?:Publication|INPUT|ResultOUT)\.?(\w*)', ctx_text)
+        pubs = [p for p in pub_matches if p]
+        
+        udfs.append({
+            'file': filename,
+            'name': name,
+            'position': idx,
+            'commands': commands,
+            'publications': pubs,
+            'context': ctx_text[:300]
+        })
+        
+        pos = idx + 1
+    
+    return udfs
+
 def summarize_tree(tree: CatPartFeatureTree) -> str:
     """Generate a human-readable summary of the feature tree."""
     lines = []
