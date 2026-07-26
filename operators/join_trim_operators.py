@@ -1,4 +1,4 @@
-"""Join/Trim Operators — Join, Healing, Untrim, Disassemble, Split, Trim, Sew."""
+"""Join/Trim Operators — Join, Healing, Untrim, Disassemble, Split, Trim, Sew, Extrapolate, Invert, Near."""
 import bpy
 from bpy.props import FloatProperty, BoolProperty, EnumProperty
 from .base_operator import GsdBaseOperator
@@ -15,7 +15,7 @@ class GSD_OT_Join(GsdBaseOperator):
             shape = bl_to_ocp_shape(obj)
             fuse = BRepAlgoAPI_Fuse(result, shape)
             fuse.Build()
-            result = fuse.Shape()
+            if fuse.IsDone(): result = fuse.Shape()
         return result
 
 class GSD_OT_Healing(GsdBaseOperator):
@@ -34,8 +34,8 @@ class GSD_OT_Untrim(GsdBaseOperator):
     bl_idname = "gsd.untrim"; bl_label = "Untrim"; gsd_command = "Untrim"
     def min_inputs(self): return 1
     def compute_ocp_result(self, inputs, params):
-        from ..core.ocp_bridge import bl_to_ocp_surface
-        return bl_to_ocp_surface(inputs[0])
+        from ..core.ocp_bridge import bl_to_ocp_shape
+        return bl_to_ocp_shape(inputs[0])
 
 class GSD_OT_Disassemble(GsdBaseOperator):
     bl_idname = "gsd.disassemble"; bl_label = "Disassemble"; gsd_command = "Disassemble"
@@ -48,15 +48,17 @@ class GSD_OT_Disassemble(GsdBaseOperator):
 class GSD_OT_Split(GsdBaseOperator):
     bl_idname = "gsd.split"; bl_label = "Split"; gsd_command = "Split"
     keep_both_sides: BoolProperty(name="Keep Both Sides", default=False)
-    def min_inputs(self): return 2  # element + cutting element
+    def min_inputs(self): return 2
     def compute_ocp_result(self, inputs, params):
         from OCP.BRepAlgoAPI import BRepAlgoAPI_Splitter
+        from OCP.TopTools import TopTools_ListOfShape
         from ..core.ocp_bridge import bl_to_ocp_shape
+        args = TopTools_ListOfShape(); args.Append(bl_to_ocp_shape(inputs[0]))
+        tools = TopTools_ListOfShape(); tools.Append(bl_to_ocp_shape(inputs[1]))
         splitter = BRepAlgoAPI_Splitter()
-        splitter.SetArguments([bl_to_ocp_shape(inputs[0])])
-        splitter.SetTools([bl_to_ocp_shape(inputs[1])])
+        splitter.SetArguments(args); splitter.SetTools(tools)
         splitter.Build()
-        return splitter.Shape()
+        return splitter.Shape() if splitter.IsDone() else bl_to_ocp_shape(inputs[0])
 
 class GSD_OT_Trim(GsdBaseOperator):
     bl_idname = "gsd.trim"; bl_label = "Trim"; gsd_command = "Trim"
@@ -67,8 +69,7 @@ class GSD_OT_Trim(GsdBaseOperator):
         from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
         from ..core.ocp_bridge import bl_to_ocp_shape
         s1 = bl_to_ocp_shape(inputs[0]); s2 = bl_to_ocp_shape(inputs[1])
-        common = BRepAlgoAPI_Common(s1, s2)
-        common.Build()
+        common = BRepAlgoAPI_Common(s1, s2); common.Build()
         return common.Shape() if common.IsDone() else s1
 
 class GSD_OT_Sew(GsdBaseOperator):
@@ -79,8 +80,7 @@ class GSD_OT_Sew(GsdBaseOperator):
         from OCP.BRepBuilderAPI import BRepBuilderAPI_Sewing
         from ..core.ocp_bridge import bl_to_ocp_shape
         sewer = BRepBuilderAPI_Sewing(params.get("tolerance", 0.001))
-        for obj in inputs:
-            sewer.Add(bl_to_ocp_shape(obj))
+        for obj in inputs: sewer.Add(bl_to_ocp_shape(obj))
         sewer.Perform()
         return sewer.SewedShape()
 
@@ -99,16 +99,16 @@ class GSD_OT_Invert(GsdBaseOperator):
     def compute_ocp_result(self, inputs, params):
         from ..core.ocp_bridge import bl_to_ocp_surface
         surf = bl_to_ocp_surface(inputs[0])
-        surf.Reverse()
+        try: surf.Reverse()
+        except: pass
         return surf
 
 class GSD_OT_Near(GsdBaseOperator):
     bl_idname = "gsd.near"; bl_label = "Near"; gsd_command = "Near"
-    def min_inputs(self): return 2  # element + reference point
+    def min_inputs(self): return 2
     def compute_ocp_result(self, inputs, params):
         from OCP.gp import gp_Pnt
         return gp_Pnt(inputs[1].location.x, inputs[1].location.y, inputs[1].location.z)
-
     def _create_result_object(self, result_shape, name):
         from ..core.ocp_bridge import ocp_to_bl_point
         return ocp_to_bl_point(result_shape, name)

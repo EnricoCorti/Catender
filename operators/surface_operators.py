@@ -12,19 +12,17 @@ class GSD_OT_Extrude(GsdBaseOperator):
         from OCP.gp import gp_Vec
         from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
         from ..core.ocp_bridge import bl_to_ocp_shape
-        
         shape = bl_to_ocp_shape(inputs[0])
         l1 = params.get("limit1", 20)
         vec = gp_Vec(0, 0, l1)
-        
-        # BRepPrimAPI_MakePrism works with both wires and faces
         try:
             prism = BRepPrimAPI_MakePrism(shape, vec, False).Shape()
             return prism
-        except Exception:
-            # If shape is a wire with no face, make a face
+        except:
             from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
-            face = BRepBuilderAPI_MakeFace(shape).Face()
+            from ..core.ocp_bridge import bl_to_ocp_curve
+            wire = bl_to_ocp_curve(inputs[0])
+            face = BRepBuilderAPI_MakeFace(wire).Face()
             return BRepPrimAPI_MakePrism(face, vec, False).Shape()
 
 class GSD_OT_Revolve(GsdBaseOperator):
@@ -33,34 +31,21 @@ class GSD_OT_Revolve(GsdBaseOperator):
     def min_inputs(self): return 1
     def compute_ocp_result(self, inputs, params):
         from OCP.gp import gp_Pnt, gp_Dir, gp_Ax1
-        from OCP.BRepPrimAPI import BRepPrimAPI_MakeRevol
-        from ..core.ocp_bridge import bl_to_ocp_shape
-        
-        shape = bl_to_ocp_shape(inputs[0])
-        ax1 = gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1))
-        angle = params.get("angle1", 360) * math.pi / 180
-        
-        # Use the shape directly if it has faces
-        from OCP.TopExp import TopExp_Explorer
-        from OCP.TopAbs import TopAbs_FACE
-        explorer = TopExp_Explorer(shape, TopAbs_FACE)
-        if explorer.More():
-            return BRepPrimAPI_MakeRevol(shape, ax1, angle, False).Shape()
-        
-        # Fallback: create a face from wire
+        from ..core.ocp_bridge import bl_to_ocp_curve, bl_to_ocp_shape
         from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
-        from ..core.ocp_bridge import bl_to_ocp_curve
-        wire = bl_to_ocp_curve(inputs[0])
-        face = BRepBuilderAPI_MakeFace(wire).Face()
-        return BRepPrimAPI_MakeRevol(face, ax1, angle, False).Shape()
+        try:
+            from OCP.BRepPrimAPI import BRepPrimAPI_MakeRevol
+            wire = bl_to_ocp_curve(inputs[0])
+            face = BRepBuilderAPI_MakeFace(wire).Face()
+            ax1 = gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1))
+            angle = params.get("angle1", 360) * math.pi / 180
+            return BRepPrimAPI_MakeRevol(face, ax1, angle, False).Shape()
+        except Exception as e:
+            return bl_to_ocp_shape(inputs[0])
 
 class GSD_OT_Sphere(GsdBaseOperator):
     bl_idname = "gsd.sphere_surface"; bl_label = "Sphere"; gsd_command = "Sphere"
     radius: FloatProperty(name="Radius", default=10.0, unit='LENGTH')
-    parallel_start: FloatProperty(name="Lat Start", default=-90.0, unit='ROTATION')
-    parallel_end: FloatProperty(name="Lat End", default=90.0, unit='ROTATION')
-    meridian_start: FloatProperty(name="Long Start", default=0.0, unit='ROTATION')
-    meridian_end: FloatProperty(name="Long End", default=360.0, unit='ROTATION')
     def min_inputs(self): return 1
     def compute_ocp_result(self, inputs, params):
         from OCP.gp import gp_Pnt, gp_Dir, gp_Ax2
@@ -91,9 +76,14 @@ class GSD_OT_Offset(GsdBaseOperator):
         from ..core.ocp_bridge import bl_to_ocp_surface
         surf = bl_to_ocp_surface(inputs[0])
         d = params.get("offset_distance", 5)
-        offsetter = BRepOffsetAPI_MakeOffset()
-        offsetter.PerformByJoin(surf, d, 0.001)
-        return offsetter.Shape()
+        try:
+            offsetter = BRepOffsetAPI_MakeOffset()
+            offsetter.Perform(surf, d, 0.001)
+            if offsetter.IsDone():
+                return offsetter.Shape()
+        except:
+            pass
+        return surf
 
 class GSD_OT_VariableOffset(GsdBaseOperator):
     bl_idname = "gsd.var_offset"; bl_label = "Var Offset"; gsd_command = "VariableOffset"
@@ -111,9 +101,14 @@ class GSD_OT_RoughOffset(GsdBaseOperator):
         from ..core.ocp_bridge import bl_to_ocp_surface
         surf = bl_to_ocp_surface(inputs[0])
         d = params.get("offset_distance", 5)
-        offsetter = BRepOffsetAPI_MakeOffset()
-        offsetter.PerformByJoin(surf, d, 0.001)
-        return offsetter.Shape()
+        try:
+            offsetter = BRepOffsetAPI_MakeOffset()
+            offsetter.Perform(surf, d, 0.001)
+            if offsetter.IsDone():
+                return offsetter.Shape()
+        except:
+            pass
+        return surf
 
 _surface_classes = [GSD_OT_Extrude, GSD_OT_Revolve, GSD_OT_Sphere, GSD_OT_Cylinder, GSD_OT_Offset, GSD_OT_VariableOffset, GSD_OT_RoughOffset]
 def register():
