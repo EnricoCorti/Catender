@@ -69,6 +69,13 @@ class SequentialReconstructor:
         def_plane = bpy.context.object; def_plane.name = 'DefaultPlane'; def_plane['gsd_type'] = 'Plane'
         self.last_of_type['Plane'] = def_plane; self.last_of_type['GSMPlane'] = def_plane
         self.last_of_type['Surface'] = def_plane
+        bpy.ops.object.select_all(action='DESELECT')
+        origin.select_set(True)
+        bpy.context.view_layer.objects.active = origin
+        bpy.ops.gsd.sphere_surface(radius=10)
+        def_sphere = bpy.context.object; def_sphere.name = 'DefaultSphere'; def_sphere['gsd_type'] = 'Sphere'
+        self.last_of_type['GSMSphere'] = def_sphere; self.last_of_type['Sphere'] = def_sphere
+        self.collection.objects.link(def_sphere)
     
     def _next_name(self, catia_type: str) -> str:
         """Generate next name based on CATIA feature type."""
@@ -185,14 +192,22 @@ class SequentialReconstructor:
         cat = self._get_catia_category(catia_type)
         needed = INPUT_TYPES.get(cat.replace("GSM", ""), [])
         
-        # Select inputs
+        # Select inputs — only if ALL needed types are available
         bpy.ops.object.select_all(action='DESELECT')
         input_objs = []
+        all_available = True
         for itype in needed:
             obj = self._get_input_object(itype)
             if obj:
                 obj.select_set(True)
                 input_objs.append(obj)
+            else:
+                all_available = False
+        
+        if not all_available and needed:
+            # Not all inputs available — let operator use defaults
+            bpy.ops.object.select_all(action='DESELECT')
+            input_objs = []
         
         if input_objs:
             bpy.context.view_layer.objects.active = input_objs[0]
