@@ -5,6 +5,7 @@ All operators follow the GsdBaseOperator pattern.
 """
 
 import bpy
+from OCP.TopoDS import TopoDS
 from bpy.props import (
     FloatProperty, IntProperty, BoolProperty, EnumProperty,
     FloatVectorProperty,
@@ -74,7 +75,8 @@ class GSD_OT_Point(GsdBaseOperator):
         from OCP.TopAbs import TopAbs_EDGE
         explorer = TopExp_Explorer(wire, TopAbs_EDGE)
         if explorer.More():
-            edge = explorer.Current()
+            shape_edge = explorer.Current()
+            edge = TopoDS.Edge_s(shape_edge)
             adaptor = BRepAdaptor_Curve(edge)
             u = adaptor.FirstParameter() + ratio * (adaptor.LastParameter() - adaptor.FirstParameter())
             return adaptor.Value(u)
@@ -91,7 +93,7 @@ class GSD_OT_Point(GsdBaseOperator):
         from ..core.ocp_bridge import bl_to_ocp_shape
         shape = bl_to_ocp_shape(obj)
         bbox = Bnd_Box()
-        BRepBndLib.Add(shape, bbox)
+        BRepBndLib.Add_s(shape, bbox)
         xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
         from OCP.gp import gp_Pnt
         return gp_Pnt((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
@@ -109,6 +111,12 @@ class GSD_OT_Point(GsdBaseOperator):
 
     def _create_result_object(self, result_shape, name):
         from ..core.ocp_bridge import ocp_to_bl_point
+        if isinstance(result_shape, list):
+            objs = []
+            for i, pnt in enumerate(result_shape):
+                obj = ocp_to_bl_point(pnt, f'{name}.{i+1}')
+                objs.append(obj)
+            return objs[0] if objs else None
         return ocp_to_bl_point(result_shape, name)
 
 
@@ -136,7 +144,8 @@ class GSD_OT_PointRepetition(GsdBaseOperator):
         if not explorer.More():
             return [gp_Pnt(0, 0, 0)]
 
-        edge = explorer.Current()
+        shape_edge = explorer.Current()
+        edge = TopoDS.Edge_s(shape_edge)
         adaptor = BRepAdaptor_Curve(edge)
         u1, u2 = adaptor.FirstParameter(), adaptor.LastParameter()
         n = params.get("nb_instances", 5)
@@ -148,16 +157,14 @@ class GSD_OT_PointRepetition(GsdBaseOperator):
             points.append(adaptor.Value(u))
         return points
 
-    def _create_result_objects(self, points, base_name):
-        """Create multiple point objects."""
+    def _create_result_object(self, result_shape, name):
+        """Handle list of points from PointRepetition."""
         from ..core.ocp_bridge import ocp_to_bl_point
-        from ..core.gsd_element import create_gsd_element, next_name
-        objs = []
-        for i, pnt in enumerate(points):
-            name = f"{base_name}.{i+1}"
-            obj = ocp_to_bl_point(pnt, name)
-            objs.append(obj)
-        return objs
+        if isinstance(result_shape, list):
+            for i, pnt in enumerate(result_shape):
+                ocp_to_bl_point(pnt, f"{name}.{i+1}")
+            return ocp_to_bl_point(result_shape[0], f"{name}.1")
+        return ocp_to_bl_point(result_shape, name)
 
 
 class GSD_OT_Extremum(GsdBaseOperator):
@@ -187,7 +194,7 @@ class GSD_OT_Extremum(GsdBaseOperator):
         from OCP.Bnd import Bnd_Box
         from OCP.BRepBndLib import BRepBndLib
         bbox = Bnd_Box()
-        BRepBndLib.Add(shape, bbox)
+        BRepBndLib.Add_s(shape, bbox)
         xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
 
         ext_type = params.get("extremum_type", "Max")
@@ -199,6 +206,12 @@ class GSD_OT_Extremum(GsdBaseOperator):
 
     def _create_result_object(self, result_shape, name):
         from ..core.ocp_bridge import ocp_to_bl_point
+        if isinstance(result_shape, list):
+            objs = []
+            for i, pnt in enumerate(result_shape):
+                obj = ocp_to_bl_point(pnt, f'{name}.{i+1}')
+                objs.append(obj)
+            return objs[0] if objs else None
         return ocp_to_bl_point(result_shape, name)
 
 
@@ -305,7 +318,8 @@ class GSD_OT_Line(GsdBaseOperator):
 
         explorer = TopExp_Explorer(wire, TopAbs_EDGE)
         if explorer.More():
-            edge = explorer.Current()
+            shape_edge = explorer.Current()
+            edge = TopoDS.Edge_s(shape_edge)
             adaptor = BRepAdaptor_Curve(edge)
             u = adaptor.FirstParameter() + 0.5 * (adaptor.LastParameter() - adaptor.FirstParameter())
             pnt = adaptor.Value(u)

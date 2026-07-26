@@ -9,12 +9,19 @@ class GSD_OT_Projection(GsdBaseOperator):
     nearest_solution: BoolProperty(name="Nearest Solution", default=True)
     def min_inputs(self): return 2  # curve + surface
     def compute_ocp_result(self, inputs, params):
-        from OCP.BRepProj import BRepProj_Projection
-        from ..core.ocp_bridge import bl_to_ocp_shape
-        wire = bl_to_ocp_shape(inputs[0]); surf = bl_to_ocp_shape(inputs[1])
-        proj = BRepProj_Projection(wire, surf, 0, 0, 0)
-        proj.Build()
-        return proj.Shape() if proj.IsDone() else wire
+        from ..core.ocp_bridge import bl_to_ocp_curve, bl_to_ocp_surface
+        wire = bl_to_ocp_curve(inputs[0])
+        try:
+            from OCP.BRepProj import BRepProj_Projection
+            from OCP.gp import gp_Dir
+            surf = bl_to_ocp_surface(inputs[1])
+            proj = BRepProj_Projection(wire, surf, gp_Dir(0, 0, 1))
+            proj.Perform()
+            if proj.IsDone():
+                return proj.Shape()
+        except Exception:
+            pass
+        return wire
 
 class GSD_OT_Combine(GsdBaseOperator):
     bl_idname = "gsd.combine"; bl_label = "Combine"; gsd_command = "Combine"
